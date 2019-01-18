@@ -1,0 +1,12 @@
+{
+	"server_port": 80,
+	"server_keys": {
+		"KEY1" : { "name": "Key 1", "perms": "/admin/hubpost/" },
+		"KEY2" : { "name": "Key 2", "perms": "/hubpost/" }
+	},
+
+	"bot_token": "discord_bot_token",
+	"bot_prefix": "!hubtracker",
+	"bot_clientid": "discord_app_client_id",
+	"bot_superuser": "discord_user_id"
+}

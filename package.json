@@ -1,0 +1,23 @@
+{
+  "name": "discordjs.uthubtracker",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Chatouille",
+  "license": "MIT",
+  "dependencies": {
+    "body-parser": "^1.18.3",
+    "compression": "^1.7.3",
+    "discord.js": "^11.4.2",
+    "express": "^4.16.4",
+    "morgan": "^1.9.1"
+  },
+  "optionalDependencies": {
+    "zlib-sync": "^0.1.4",
+    "erlpack": "^0.1.0",
+    "uws": "^11.149.1"
+  }
+}
