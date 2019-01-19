@@ -31,7 +31,18 @@ const db = {
 	file   : 'db.json',
 	backup : 'db.json.bak',
 	data   : {},
-	save   : function() {
+
+	// merge calls, save next tick
+	save: function() {
+		if ( db.saveTimeout )
+			return;
+		db.saveTimeout = setTimeout(function() {
+			delete db.saveTimeout;
+			db.__save();
+		});
+	},
+
+	__save: function() {
 		try {
 			fs.renameSync(db.file, db.backup);
 		}
@@ -47,6 +58,9 @@ const db = {
 		}
 		console.info("db saved");
 	},
+
+	
+	
 };
 try {
 	db.data = JSON.parse(fs.readFileSync(db.file));
@@ -57,7 +71,7 @@ catch(err) {
 
 // Map hubName => { channelID => messageID }
 db.data.Trackers || (db.data.Trackers = {});
-console.info(Object.keys(db.data.Trackers).length + " trackers in db");
+console.info( Object.keys(db.data.Trackers).reduce((acc,hubName) => acc+Object.keys(db.data.Trackers[hubName]).length, 0) + " trackers in db");
 
 
 //================================================
@@ -142,13 +156,14 @@ server.post('/hub/post', function(req, res) {
 		console.debug(req.body);
 		//console.debug(JSON.stringify(req.body,null,2));
 
-		if ( typeof(req.body.ServerName) != 'string' || !req.body.ServerName )
+		if ( typeof(req.body.ServerName) != 'string' || !req.body.ServerName.trim() )
 			throw "invalid 'ServerName'";
 
 		if ( Hubs[req.body.ServerName] && Date.now() - Hubs[req.body.ServerName].timestamp < 10000 )
 			throw "too many updates";
 
 		// validate used data to avoid crashes, just in case
+		req.body.ServerName = req.body.ServerName.trim();
 		if ( typeof(req.body.Players) != 'object' || !req.body.Players.length ) req.body.Players = [];
 		if ( typeof(req.body.Instances) != 'object' || !req.body.Instances.length ) req.body.Instances = [];
 		req.body.ElapsedTime = Number(req.body.ElapsedTime);
@@ -252,13 +267,13 @@ function processCommand(msg, cmd) {
 			reply(msg, "```markdown\n" + [
 				"USAGE",
 				"-----",
-				config.bot_prefix + "list       : list all known hubs",
+				config.bot_prefix + "available  : list all known hubs",
 				config.bot_prefix + "add <hub>  : track hub in channel",
 				config.bot_prefix + "rm  <hub>  : stop tracking hub in channel",
 			].join('\n') + "```");
 			break;
 
-		case 'list':
+		case 'available':
 			reply(msg, "```\n" + Object.keys(Hubs).map(name => ('"' + name + '"')).join("\n") + "```");
 			break;
 
@@ -296,8 +311,7 @@ function processCommand(msg, cmd) {
 				.catch(err => console.warn("[Bot] Failed to fetch/delete message:", err));
 
 				// remove from trackers
-				delete db.data.Trackers[name][msg.channel.id];
-				db.save();
+				removeTracker(name, msg.channel.id);
 
 				reply(msg, 'Removed tracker for "' + name + '"');
 			}
@@ -315,8 +329,19 @@ function processCommand(msg, cmd) {
 				reply(msg, 'Unknown hub "' + name + '"');
 			break;
 
+		case 'invite':
+			if ( msg.author.id == config.bot_superuser ) {
+				bot.generateInvite(2048)
+				.then(invite => reply(msg, "<"+invite+">"))
+				.catch(err => {
+					console.warn("[Bot] Invite failed:", err.code, err.message);
+					reply(msg, "An error occured");
+				});
+			}
+			break;
+
 		default:
-			reply(msg, "Unknown command '" + cmd[0] + "'");
+			reply(msg, "Unknown command '" + action + "'");
 			break;
 	}
 }
@@ -396,9 +421,25 @@ function findMessage(hubName, channelID, messageID) {
 		return msg;
 	})
 	.catch(err => {
-		console.warn("[Bot] Failed to fetch message " + messageID);
+		console.warn("[Bot] Failed to fetch message " + messageID + ":", err.code, err.message);
+		if ( err.code == 10008 ) {
+			// message has most likely been deleted - remove tracker
+			if ( db.data.Trackers[hubName] && db.data.Trackers[hubName][channelID] == messageID )
+				removeTracker(hubName, channelID);
+		}
 		return null;
 	});
+}
+
+function removeTracker(hubName, channelID) {
+	if ( CachedTrackers[hubName] )
+		delete CachedTrackers[hubName][channelID];
+
+	delete db.data.Trackers[hubName][channelID];
+	if ( Object.keys(db.data.Trackers[hubName]).length == 0 )
+		delete db.data.Trackers[hubName];
+
+	db.save();
 }
 
 // Edit all tracker messages for this hub
@@ -422,7 +463,13 @@ function updateTrackers(hubName, text) {
 			// update cache (not sure if necessary)
 			CachedTrackers[hubName][msg.channel.id] = msg;
 		})
-		.catch(err => console.warn("[Bot] Failed to edit message:", err))
+		.catch(err => {
+			console.warn("[Bot] Failed to edit message " + msg.id + ":", err.code, err.message);
+			if ( err.code == 10008 ) {
+				// cached message was deleted - remove cache & tracker
+				removeTracker(hubName, channelID);
+			}
+		})
 	));
 }
 
@@ -462,7 +509,8 @@ function formatHub(hub) {
 		hub.ServerName,
 	];
 
-	var numPlayers = utils.plural(hub.Players.length," player");
+	var numPlayers = hub.Players.length + hub.Instances.reduce((acc,inst) => acc+inst.NumPlayers, 0);
+	numPlayers = utils.plural(numPlayers," player");
 	var numMatches = utils.plural(hub.Instances.length," match"," matches");
 	var len = Math.max(hub.ServerName.length, numPlayers.length+4+numMatches.length);
 	lines.push( utils.repeatStr('-', len) );
@@ -495,7 +543,7 @@ function formatHub(hub) {
 			+ utils.padAlignLeft(utils.truncate(game,18),20)
 			+ utils.padAlignLeft(utils.truncate(instance.MapName,12),14)
 			+ utils.padAlignLeft(instance.NumPlayers + " / " + instance.MaxPlayers,9)
-			+ utils.padAlignRight(formatAlive(hub.ElapsedTime - instance.InstanceLaunchTime), 6)
+			+ utils.padAlignRight(formatAlive(hub.RealTimeSeconds - instance.InstanceLaunchTime), 6)
 		);
 	}
 
