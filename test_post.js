@@ -1,12 +1,15 @@
 
 const config = require('./config.json');
 
-const http = require('http');
+const http = require('https');
 
 var req = http.request({
-	host   : '127.0.0.1',
-	port   : 10000,
-	path   : '/hub/post',
+	//host   : '127.0.0.1',
+	//port   : 10000,
+	//path   : '/hub/post',
+	host: 'ut4bt.ga',
+	port: '443',
+	path: '/api/hubtracker',
 	method : 'POST',
 	headers: {
 		'Content-Type' : 'application/json',
@@ -20,13 +23,13 @@ var req = http.request({
 req.on('error', err => console.error(err));
 
 var body1 = {
-	ServerName  : "TFN #2 : Bunnytrack Home",
+	ServerName  : "Test Fake Hub",
 	ElapsedTime : 100,
 	Players     : [],
 	Instances   : [],
 };
 var body2 = {
-	ServerName  : "TFN #2 : Bunnytrack Home",
+	ServerName  : "Test Fake Hub",
 	ElapsedTime : 200,
 	Players     : [ {} ],
 	Instances   : [{
@@ -40,7 +43,7 @@ var body2 = {
 	}],
 };
 var body3 = {
-	ServerName  : "TFN #2 : Bunnytrack Home",
+	ServerName  : "Test Fake Hub",
 	ElapsedTime : 10000,
 	Players     : [ {}, {}, {} ],
 	Instances   : [{

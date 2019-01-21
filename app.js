@@ -69,7 +69,7 @@ catch(err) {
 	console.warn("Failed to read db file:", err.message);
 }
 
-// Map hubName => { channelID => messageID }
+// Map hubName => { channelID : messageID }
 db.data.Trackers || (db.data.Trackers = {});
 console.info( Object.keys(db.data.Trackers).reduce((acc,hubName) => acc+Object.keys(db.data.Trackers[hubName]).length, 0) + " trackers in db");
 
