@@ -7,9 +7,9 @@ var req = http.request({
 	//host   : '127.0.0.1',
 	//port   : 10000,
 	//path   : '/hub/post',
-	host: 'ut4bt.ga',
+	host: 'hubtracker.ut4bt.ga',
 	port: '443',
-	path: '/api/hubtracker',
+	path: '/hub/post',
 	method : 'POST',
 	headers: {
 		'Content-Type' : 'application/json',
