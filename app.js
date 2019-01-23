@@ -97,12 +97,14 @@ server.use(function(req, res, next) {
 			);
 		}
 	});
-	// log api requests (maybe only in debug mode ?)
-	console.custom('req', logger.CYAN,
-		req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.ip || req._remoteAddress || (req.connection && req.connection.remoteAddress) || '?',
-		req.method || '?',
-		req.url
-	);
+	// log api requests
+	if ( logger.debug ) {
+		console.custom('req', logger.CYAN,
+			req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.ip || req._remoteAddress || (req.connection && req.connection.remoteAddress) || '?',
+			req.method || '?',
+			req.url
+		);
+	}
 	return next();
 });
 

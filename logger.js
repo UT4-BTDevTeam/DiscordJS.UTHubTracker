@@ -37,6 +37,7 @@ console.custom = function(k,c) {
 console.debug = function() {}
 
 console.setDebug = function(b) {
+	exports.debug = !!b;
 	b || console.debug("Debug disabled");
 	console.debug = b ? function() { process.stdout.write(console.ts() + " " + exports.GRAY + "debug:" + exports.NORMAL + " "); console._log.apply(null, arguments); } : function(){}
 	b && console.debug("Debug enabled");
