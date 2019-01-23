@@ -1,5 +1,5 @@
 
-require('./logging');
+const logger = require('./logger');
 const utils = require('./utils');
 
 //================================================
@@ -84,9 +84,27 @@ const server = express();
 server.set('port', config.server_port);
 
 // logger
-server.use(require('morgan')('short', {
-	skip: function(req, res) { return res.statusCode < 400 },
-}));
+const onFinished = require('on-finished');
+server.use(function(req, res, next) {
+	req.headers || (req.headers = []);
+	// log error responses
+	onFinished(req, function() {
+		if ( res.statusCode >= 400 ) {
+			console.custom(res.statusCode, (res.statusCode < 500) ? logger.YELLOW : logger.RED,
+				req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.ip || req._remoteAddress || (req.connection && req.connection.remoteAddress) || '?',
+				req.method || '?',
+				req.url
+			);
+		}
+	});
+	// log api requests (maybe only in debug mode ?)
+	console.custom('req', logger.CYAN,
+		req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.ip || req._remoteAddress || (req.connection && req.connection.remoteAddress) || '?',
+		req.method || '?',
+		req.url
+	);
+	return next();
+});
 
 // body parser
 server.use(require('body-parser').json({
@@ -195,6 +213,11 @@ server.post('/hub/post', function(req, res) {
 		else
 			res.status(400).send({status:400, code:400, message:err});
 	});
+});
+
+// Final catchall route for 404
+server.all('*', function(req, res) {
+	res.status(404).send({status:404, code:404, message:"Not Found"});
 });
 
 // Error handling middleware
