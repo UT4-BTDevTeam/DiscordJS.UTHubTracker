@@ -88,7 +88,7 @@ const onFinished = require('on-finished');
 server.use(function(req, res, next) {
 	req.headers || (req.headers = []);
 	// log error responses
-	onFinished(req, function() {
+	onFinished(res, function() {
 		if ( res.statusCode >= 400 ) {
 			console.custom(res.statusCode, (res.statusCode < 500) ? logger.YELLOW : logger.RED,
 				req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.ip || req._remoteAddress || (req.connection && req.connection.remoteAddress) || '?',
@@ -198,6 +198,10 @@ server.post('/hub/post', function(req, res) {
 		}
 
 		req.body.timestamp = Date.now();
+
+		if ( !Hubs[req.body.ServerName] )
+			console.info('Registering new Hub "' + req.body.ServerName + '"');
+
 		Hubs[req.body.ServerName] = req.body;
 
 		// Update trackers (asynchronously - errors here don't relate to the request)
