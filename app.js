@@ -59,8 +59,6 @@ const db = {
 		console.info("db saved");
 	},
 
-	
-	
 };
 try {
 	db.data = JSON.parse(fs.readFileSync(db.file));
@@ -529,19 +527,21 @@ function formatSince(ts) {
 // Format hub message (if alive)
 function formatHub(hub) {
 
+	var hubName = sanitizeForDiscordBlock(hub.ServerName);
+
 	// case where hub exists but is stale (might be called from the ADD command)
 	if ( Date.now() - hub.timestamp >= 65000 )
-		return "```markdown\n" + hub.ServerName + "\n" + utils.repeatStr('-', hub.ServerName.length) + "\n" + "No data received since " + formatSince(hub.timestamp) + "\n```";
+		return "```markdown\n" + hubName + "\n" + utils.repeatStr('-', hubName.length) + "\nNo data received since " + formatSince(hub.timestamp) + "```";
 
 	var lines = [
 		"```markdown",
-		hub.ServerName,
+		hubName,
 	];
 
 	var numPlayers = hub.Players.length + hub.Instances.reduce((acc,inst) => acc+inst.NumPlayers, 0);
 	numPlayers = utils.plural(numPlayers," player");
 	var numMatches = utils.plural(hub.Instances.length," match"," matches");
-	var len = Math.max(hub.ServerName.length, numPlayers.length+4+numMatches.length);
+	var len = Math.max(lines[1].length, numPlayers.length+4+numMatches.length);
 	lines.push( utils.repeatStr('-', len) );
 	lines.push( numPlayers + utils.padAlignRight(numMatches, len-numPlayers.length) );
 
@@ -559,7 +559,7 @@ function formatHub(hub) {
 
 	for ( var instance of hub.Instances ) {
 
-		var name = instance.CustomGameName;
+		var name = sanitizeForDiscordBlock(instance.CustomGameName);
 		if ( instance.Flags & MATCH_FLAGS.Private )
 			name = "🔒" + name;
 
@@ -583,6 +583,10 @@ function formatHub(hub) {
 function formatAlive(seconds) {
 	seconds = Math.round(Math.max(0,seconds));
 	return Math.floor(seconds/3600) + "h" + ("0"+Math.floor((seconds%3600)/60)).slice(-2) + "m";
+}
+
+function sanitizeForDiscordBlock(str) {
+	return str.replace(/`/g, "'").replace(/_/g, "").replace(/\n/g, " ");
 }
 
 
