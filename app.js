@@ -173,14 +173,17 @@ server.post('/hub/post', function(req, res) {
 		console.debug(req.body);
 		//console.debug(JSON.stringify(req.body,null,2));
 
-		if ( typeof(req.body.ServerName) != 'string' || !req.body.ServerName.trim() )
+		if ( typeof(req.body.ServerName) != 'string' )
 			throw "invalid 'ServerName'";
 
-		if ( Hubs[req.body.ServerName] && Date.now() - Hubs[req.body.ServerName].timestamp < 10000 )
+		var hubName = sanitizeForDiscordBlock(req.body.ServerName);
+		if ( !hubName )
+			throw "invalid 'ServerName'";
+
+		if ( Hubs[hubName] && Date.now() - Hubs[hubName].timestamp < 10000 )
 			throw "too many updates";
 
 		// validate used data to avoid crashes, just in case
-		req.body.ServerName = req.body.ServerName.trim();
 		if ( typeof(req.body.Players) != 'object' || !req.body.Players.length ) req.body.Players = [];
 		if ( typeof(req.body.Instances) != 'object' || !req.body.Instances.length ) req.body.Instances = [];
 		req.body.ElapsedTime = Number(req.body.ElapsedTime);
@@ -196,14 +199,14 @@ server.post('/hub/post', function(req, res) {
 
 		req.body.timestamp = Date.now();
 
-		if ( !Hubs[req.body.ServerName] )
-			console.info('Registering new Hub "' + req.body.ServerName + '"');
+		if ( !Hubs[hubName] )
+			console.info('Registering new Hub "' + hubName + '"');
 
-		Hubs[req.body.ServerName] = req.body;
+		Hubs[hubName] = req.body;
 
 		// Update trackers (asynchronously - errors here don't relate to the request)
 		setTimeout(function() {
-			updateTrackers(req.body.ServerName, formatHub(req.body));
+			updateTrackers(hubName, formatHub(req.body));
 		});
 
 		return res.json({ status:'OK' });
@@ -585,7 +588,7 @@ function formatAlive(seconds) {
 }
 
 function sanitizeForDiscordBlock(str) {
-	return str.replace(/`/g, "'").replace(/_/g, "").replace(/\n/g, " ");
+	return str.replace(/`/g, "'").replace(/[_\n\r\t]/g, " ").trim();
 }
 
 
