@@ -9,7 +9,7 @@ const utils = require('./utils');
 const config = require('./config.json');
 
 if ( typeof(config.server_port) != 'number' || !config.server_port ) {
-	config.server_port = config.server_https ? 443 : (env == 'production' ? 80 : 1337);
+	config.server_port = 1337;
 	console.warn("Missing or invalid 'server_port' in configuration - defaulting to " + config.server_port);
 }
 
@@ -81,8 +81,6 @@ console.info( Object.keys(db.data.Trackers).reduce((acc,hubName) => acc+Object.k
 const express = require('express');
 const server = express();
 
-server.set('port', config.server_port);
-
 // logger
 const onFinished = require('on-finished');
 server.use(function(req, res, next) {
@@ -119,11 +117,11 @@ server.on('error', function onError(err) {
 		throw err;
 	switch ( err.code ) {
 		case 'EACCES':
-			console.error("[Server] Port " + server.get('port') + " requires elevated privileges");
+			console.error("[Server] Port " + config.server_port + " requires elevated privileges");
 			process.exit(1);
 			break;
 		case 'EADDRINUSE':
-			console.error("[Server] Port " + server.get('port') + " is already in use");
+			console.error("[Server] Port " + config.server_port + " is already in use");
 			process.exit(1);
 			break;
 		default:
@@ -131,6 +129,7 @@ server.on('error', function onError(err) {
 	}
 });
 
+// Map hubName => {hubData}
 const Hubs = {};
 
 const MATCH_FLAGS = {
@@ -226,11 +225,11 @@ server.use(function errorMiddleware(err, req, res, next) {
 	if ( res.headersSent )
 		next();
 	else
-		res.status(500).send({status:500, code:500, message:"Server Error"});
+		res.status(500).send({status:500, code:500, message:"Internal Server Error"});
 });
 
-const ServerListener = server.listen(server.get('port'), function() {
-	console.info("[Server] Running on port " + server.get('port'));
+const ServerListener = server.listen(config.server_port, function() {
+	console.info("[Server] Running on port " + config.server_port);
 });
 
 
@@ -258,7 +257,7 @@ bot.on('disconnect', code => {
 	bot.bOnline = false;
 	utils.delayPromise(1000)
 	.then(_ => utils.trySeveral(login, undefined, 100, 5000))
-	.catch(err => console.error("[Bot] Failed to reconnect after 100 tries - giving up"));
+	.catch(err => console.error("[Bot] Failed to reconnect after 100 tries - giving up:", err.message));
 });
 
 // Emitted whenever the client's WebSocket encounters a connection error.
@@ -273,7 +272,7 @@ bot.on('error', function(err) {
 });
 
 bot.on('message', msg => {
-	if ( msg.content.startsWith(config.bot_prefix) ) {
+	if ( msg.content.toLowerCase().startsWith(config.bot_prefix) ) {
 		if ( msg.channel.permissionsFor(msg.author).has("MANAGE_CHANNELS") || msg.author.id == config.superuser ) {
 			var cmd = msg.content.substr(config.bot_prefix.length);
 			processCommand(msg, cmd);
@@ -282,9 +281,8 @@ bot.on('message', msg => {
 });
 
 function processCommand(msg, cmd) {
-	var action = cmd.trim().split(' ')[0];
-	action || (action = "help");
-	switch (action.toLowerCase()) {
+	var action = cmd.trim().split(' ')[0].toLowerCase() || "help";
+	switch (action) {
 
 		case 'help':
 			reply(msg, "```markdown\n" + [
@@ -297,11 +295,11 @@ function processCommand(msg, cmd) {
 			break;
 
 		case 'available':
-			reply(msg, "```\n" + Object.keys(Hubs).map(name => ('"' + name + '"')).join("\n") + "```");
+			reply(msg, "```\n" + Object.keys(Hubs).map(name => ('"' + sanitizeForDiscordBlock(name) + '"')).join("\n") + "```");
 			break;
 
 		case 'add':
-			var name = cmd.substr(action.length+1);
+			var name = cmd.substr(action.length+1).trim();
 			if ( name.startsWith('"') && name.endsWith('"') )
 				name = name.slice(1,-1);
 			if ( Hubs[name] ) {
@@ -323,7 +321,7 @@ function processCommand(msg, cmd) {
 
 		case 'rm':
 		case 'remove':
-			var name = cmd.substr(action.length+1);
+			var name = cmd.substr(action.length+1).trim();
 			if ( name.startsWith('"') && name.endsWith('"') )
 				name = name.slice(1,-1);
 			if ( db.data.Trackers[name] && db.data.Trackers[name][msg.channel.id] ) {
@@ -331,7 +329,7 @@ function processCommand(msg, cmd) {
 				// try to delete the message
 				findMessage(name, msg.channel.id, db.data.Trackers[name][msg.channel.id])
 				.then(msg => msg && msg.delete())
-				.catch(err => console.warn("[Bot] Failed to fetch/delete message:", err));
+				.catch(err => console.warn("[Bot] Failed to fetch/delete message:", err.message));
 
 				// remove from trackers
 				removeTracker(name, msg.channel.id);
@@ -343,7 +341,7 @@ function processCommand(msg, cmd) {
 			break;
 
 		case 'test':
-			var name = cmd.substr(action.length+1);
+			var name = cmd.substr(action.length+1).trim();
 			if ( name.startsWith('"') && name.endsWith('"') )
 				name = name.slice(1,-1);
 			if ( Hubs[name] )
@@ -471,7 +469,7 @@ function updateTrackers(hubName, text) {
 		return;
 
 	// nothing to do
-	if ( !db.data.Trackers[hubName] || db.data.Trackers[hubName].length == 0 )
+	if ( !db.data.Trackers[hubName] || Object.keys(db.data.Trackers[hubName]).length == 0 )
 		return;
 
 	// find the messages to edit
@@ -509,7 +507,8 @@ setInterval(function trackOfflineHubs() {
 		else
 			continue;
 
-		text = "```markdown\n" + hubName + "\n" + utils.repeatStr('-', hubName.length) + "\n" + text + "\n```";
+		var sanitized = sanitizeForDiscordBlock(hubName);
+		text = "```markdown\n" + sanitized + "\n" + utils.repeatStr('-', sanitized.length) + "\n" + text + "```";
 
 		updateTrackers(hubName, text);
 	}
