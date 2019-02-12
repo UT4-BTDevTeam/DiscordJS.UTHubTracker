@@ -112,6 +112,9 @@ server.use(require('body-parser').json({
 server.use(require('compression')({
 }));
 
+// favicon
+server.use(require('serve-favicon')(__dirname + '/favicon.jpg'));
+
 server.on('error', function onError(err) {
 	if ( err.syscall !== 'listen' )
 		throw err;
@@ -131,15 +134,6 @@ server.on('error', function onError(err) {
 
 // Map hubName => {hubData}
 const Hubs = {};
-
-const MATCH_FLAGS = {
-	InProgress       : 0x0001,
-	Ranked           : 0x0002,
-	Private          : 0x0004,
-	NoJoinInProgress : 0x0008,
-	NoSpectators     : 0x0010,
-	Beginner         : 0x0020,
-};
 
 function accessControl(req, res, perm) {
 	var token = req.headers['x-api-token'];
@@ -162,6 +156,7 @@ function accessControl(req, res, perm) {
 	return user;
 }
 
+// Entry point for HUB plugin (UTHubAdvertiser)
 server.post('/hub/post', function(req, res) {
 	if ( !accessControl(req, res, 'hubpost') )
 		return;
@@ -220,6 +215,59 @@ server.post('/hub/post', function(req, res) {
 			res.status(400).send({status:400, code:400, message:err});
 	});
 });
+
+// Public API : Get all current active hubs
+server.get(['/hubs', '/hubs/:schema'], function(req, res) {
+	var schema = (req.params.schema || "").split('+');
+
+	var data = {}, hub, output, keyPath;
+	for ( var name in Hubs ) {
+		hub = Hubs[name];
+		if ( !hub.stale ) {
+			output = {};
+			for ( keyPath of schema )
+				includeKeyPath(hub, keyPath, output);
+			data[name] = output;
+		}
+	}
+
+	res.status(200).send({ status:'OK', data:data });
+});
+
+function includeKeyPath(inObj, keyPath, outObj) {
+	if ( !inObj || !outObj )
+		return;
+
+	if ( typeof(keyPath) == 'string' )
+		keyPath = keyPath.split('.');
+
+	if ( keyPath.length == 1 ) {
+		// if array of objects, include an array of empty subobjects
+		// if array of values, include as is
+		if ( typeof(inObj[keyPath]) == 'object' && inObj[keyPath] ) {
+			outObj[keyPath] = inObj[keyPath].map(elem => {
+				if ( typeof(elem) == 'object' && elem )
+					return {};
+				else
+					return elem;
+			});
+		}
+		// if value, copy as is
+		else
+			outObj[keyPath] = inObj[keyPath];
+	}
+	else {
+		inObj = inObj[keyPath[0]];
+		outObj = outObj[keyPath[0]];
+		// if keys are properly set in right order, outObj array should be prepared with empty subobjects
+		if ( inObj && inObj.length && outObj && outObj.length ) {
+			for ( var i=0; i<inObj.length; i++ ) {
+				// recurse on array subobjects
+				includeKeyPath(inObj[i], keyPath.slice(1), outObj[i]);
+			}
+		}
+	}
+}
 
 // Final catchall route for 404
 server.all('*', function(req, res) {
@@ -302,7 +350,7 @@ function processCommand(msg, cmd) {
 			break;
 
 		case 'available':
-			reply(msg, "```\n" + Object.keys(Hubs).map(name => ('"' + sanitizeForDiscordBlock(name) + '"')).join("\n") + "```");
+			reply(msg, "```\n" + Object.keys(Hubs).map(name => ('"' + name + '"')).join("\n") + "```");
 			break;
 
 		case 'add':
@@ -423,6 +471,15 @@ function getInviteLink() {
 // Bridging
 //================================================
 
+const MATCH_FLAGS = {
+	InProgress       : 0x0001,
+	Ranked           : 0x0002,
+	Private          : 0x0004,
+	NoJoinInProgress : 0x0008,
+	NoSpectators     : 0x0010,
+	Beginner         : 0x0020,
+};
+
 // cache hubName => { channelID => message object }
 // so we don't have to get channel and then fetch message all the time
 var CachedTrackers = {};
@@ -509,8 +566,10 @@ setInterval(function trackOfflineHubs() {
 		var text;
 		if ( !Hubs[hubName] )
 			text = "No data received.";
-		else if ( Date.now() - Hubs[hubName].timestamp >= 65000 )
+		else if ( Date.now() - Hubs[hubName].timestamp >= 65000 ) {
+			Hubs[hubName].stale = true;
 			text = "No data received since " + formatSince(Hubs[hubName].timestamp);
+		}
 		else
 			continue;
 
@@ -532,7 +591,7 @@ function formatHub(hub) {
 	var hubName = sanitizeForDiscordBlock(hub.ServerName);
 
 	// case where hub exists but is stale (might be called from the ADD command)
-	if ( Date.now() - hub.timestamp >= 65000 )
+	if ( hub.stale )
 		return "```markdown\n" + hubName + "\n" + utils.repeatStr('-', hubName.length) + "\nNo data received since " + formatSince(hub.timestamp) + "```";
 
 	var lines = [

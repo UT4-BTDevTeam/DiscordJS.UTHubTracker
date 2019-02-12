@@ -13,7 +13,8 @@
     "compression": "^1.7.3",
     "discord.js": "^11.4.2",
     "express": "^4.16.4",
-    "on-finished": "^2.3.0"
+    "on-finished": "^2.3.0",
+    "serve-favicon": "^2.5.0"
   },
   "optionalDependencies": {
     "zlib-sync": "^0.1.4",
