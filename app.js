@@ -327,11 +327,13 @@ bot.on('error', function(err) {
 });
 
 bot.on('message', msg => {
-	if ( msg.content.toLowerCase().startsWith(config.bot_prefix) ) {
-		if ( msg.channel.permissionsFor(msg.author).has("MANAGE_CHANNELS") || msg.author.id == config.superuser ) {
+	if ( msg.content.toLowerCase().startsWith(config.bot_prefix) && msg.channel ) {
+		if ( msg.channel.permissionsFor(msg.author).has("MANAGE_CHANNELS") || msg.author.id == config.bot_superuser ) {
 			var cmd = msg.content.substr(config.bot_prefix.length);
 			processCommand(msg, cmd);
 		}
+		else
+			reply(msg, "You do not have enough permissions to configure this bot");
 	}
 });
 
