@@ -327,7 +327,7 @@ bot.on('error', function(err) {
 });
 
 bot.on('message', msg => {
-	if ( msg.content.toLowerCase().startsWith(config.bot_prefix) && msg.channel ) {
+	if ( msg.content.toLowerCase().startsWith(config.bot_prefix) && msg.channel && typeof(msg.channel.permissionsFor) == 'function' ) {
 		if ( msg.channel.permissionsFor(msg.author).has("MANAGE_CHANNELS") || msg.author.id == config.bot_superuser ) {
 			var cmd = msg.content.substr(config.bot_prefix.length);
 			processCommand(msg, cmd);
