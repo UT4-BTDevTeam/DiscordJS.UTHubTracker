@@ -190,6 +190,10 @@ server.post('/hub/post', function(req, res) {
 			i.NumPlayers = Number(i.NumPlayers);
 			i.MaxPlayers = Number(i.MaxPlayers);
 			i.InstanceLaunchTime = Number(i.InstanceLaunchTime);
+			if ( typeof(i.Players) != 'object' || !i.Players.length ) i.Players = [];
+			for ( var p of i.Players ) {
+				p.PlayerName = String(p.PlayerName);
+			}
 		}
 
 		req.body.timestamp = Date.now();
@@ -615,7 +619,7 @@ function formatHub(hub) {
 		+ utils.padAlignLeft("Game",20)
 		+ utils.padAlignLeft("Map",14)
 		+ utils.padAlignLeft("Players",9)
-		+ utils.padAlignRight("Alive",6)
+		+ utils.padAlignRight("Since",6)
 	);
 
 	lines.push( utils.repeatStr('-', lines[5].length) );
@@ -630,13 +634,22 @@ function formatHub(hub) {
 		if ( game.startsWith('Custom ') )
 			game = '*'+game.substr(7);
 
+		var slots = instance.NumPlayers + " / " + instance.MaxPlayers;
+		if ( slots.length <= 6 )	// center the slash
+			slots = " " + slots;
+
 		lines.push(
 			utils.padAlignLeft(utils.truncate(name,18),20)
 			+ utils.padAlignLeft(utils.truncate(game,18),20)
 			+ utils.padAlignLeft(utils.truncate(instance.MapName,12),14)
-			+ utils.padAlignLeft(instance.NumPlayers + " / " + instance.MaxPlayers,9)
+			+ utils.padAlignLeft(slots,9)
 			+ utils.padAlignRight(formatAlive(hub.RealTimeSeconds - instance.InstanceLaunchTime), 6)
 		);
+
+		// experimental: show players on second line
+		lines.push("> " + instance.Players.map(p => p.PlayerName.substr(0,10)).join(" "));
+		// + separator
+		lines.push("#" + utils.repeatStr('-', lines[5].length-2) + "#");
 	}
 
 	lines.push("```");
