@@ -624,6 +624,8 @@ function formatHub(hub) {
 
 	lines.push( utils.repeatStr('-', lines[5].length) );
 
+	var separatorLines = [];
+
 	for ( var instance of hub.Instances ) {
 
 		var name = sanitizeForDiscordBlock(instance.CustomGameName);
@@ -649,11 +651,21 @@ function formatHub(hub) {
 		// experimental: show players on second line
 		lines.push("> " + instance.Players.map(p => p.PlayerName.substr(0,10)).join(" "));
 		// + separator
+		separatorLines.push(lines.length);
 		lines.push("#" + utils.repeatStr('-', lines[5].length-2) + "#");
 	}
 
 	lines.push("```");
-	return lines.join("\n");
+	var msg = lines.join("\n");
+
+	// remove lengthy separators if above 2000 chars
+	if ( msg.length > 1900 ) {
+		for ( var i of separatorLines )
+			lines[i] = "";
+		msg = lines.join("\n");
+	}
+
+	return msg;
 }
 
 function formatAlive(seconds) {
