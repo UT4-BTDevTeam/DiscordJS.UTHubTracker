@@ -308,7 +308,14 @@ function login() {
 	});
 }
 
-setTimeout(login);	// STARTUP
+//STARTUP
+setTimeout(function main() {
+	utils.trySeveral(login, undefined, 3, 3000)
+	.catch(err => {
+		console.error("[Bot] Initial login failed:", err.message);
+		process.exit(1);
+	});
+});
 
 // Emitted when the client's WebSocket disconnects and will no longer attempt to reconnect.
 bot.on('disconnect', code => {
@@ -321,13 +328,13 @@ bot.on('disconnect', code => {
 
 // Emitted whenever the client's WebSocket encounters a connection error.
 bot.on('error', function(err) {
-	/*
-	console.error("[Bot] Error:", err.message);
+	console.warn("[Bot] Error:", err.message);
+/*
 	bot.bOnline = false;
 	utils.delayPromise(1000)
 	.then(_ => utils.trySeveral(login, undefined, 100, 5000))
 	.catch(err => console.error("[Bot] Failed to reconnect after 100 tries - giving up"));
-	*/
+*/
 });
 
 bot.on('message', msg => {
@@ -580,7 +587,7 @@ setInterval(function trackOfflineHubs() {
 			continue;
 
 		var sanitized = sanitizeForDiscordBlock(hubName);
-		text = "```markdown\n" + sanitized + "\n" + utils.repeatStr('-', sanitized.length) + "\n" + text + "```";
+		text = "`"+formatDateTime()+"` ```markdown\n" + sanitized + "\n" + utils.repeatStr('-', sanitized.length) + "\n" + text + "```";
 
 		updateTrackers(hubName, text);
 	}
@@ -598,10 +605,10 @@ function formatHub(hub) {
 
 	// case where hub exists but is stale (might be called from the ADD command)
 	if ( hub.stale )
-		return "```markdown\n" + hubName + "\n" + utils.repeatStr('-', hubName.length) + "\nNo data received since " + formatSince(hub.timestamp) + "```";
+		return "`"+formatDateTime()+"` ```markdown\n" + hubName + "\n" + utils.repeatStr('-', hubName.length) + "\nNo data received since " + formatSince(hub.timestamp) + "```";
 
 	var lines = [
-		"```markdown",
+		"`"+formatDateTime()+"` ```markdown",
 		hubName,
 	];
 
@@ -666,6 +673,11 @@ function formatHub(hub) {
 	}
 
 	return msg;
+}
+
+function formatDateTime() {
+	var d = new Date();
+	return ('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+' '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
 }
 
 function formatAlive(seconds) {

@@ -16,4 +16,3 @@ mv run.err logs/$savestamp.err
 echo
 echo "starting $uid (run.log, run.err)"
 forever -l forever.log -a -o run.log -e run.err --uid "$uid" start app.js
-
