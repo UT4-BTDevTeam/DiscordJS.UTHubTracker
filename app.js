@@ -356,13 +356,16 @@ function processCommand(msg, cmd) {
 			reply(msg, "```markdown\n" + [
 				"USAGE",
 				"-----",
-				config.bot_prefix + "available  : list all known hubs",
+				config.bot_prefix + "list       : list all known hubs",
 				config.bot_prefix + "add <hub>  : track hub in channel",
 				config.bot_prefix + "rm  <hub>  : stop tracking hub in channel",
+				config.bot_prefix + "edit <old> <new>  : edit a tracker in-place (quotes required)",
+				config.bot_prefix + "cleanup    : delete bot messages that are not active trackers",
 			].join('\n') + "```");
 			break;
 
 		case 'available':
+		case 'list':
 			reply(msg, "```\n" + Object.keys(Hubs).map(name => ('"' + name + '"')).join("\n") + "```");
 			break;
 
@@ -406,6 +409,67 @@ function processCommand(msg, cmd) {
 			}
 			else
 				reply(msg, 'Hub "' + name + '" is not being tracked here');
+			break;
+
+		case 'rename':
+		case 'edit':
+			var args = cmd.substr(action.length+1).trim();
+			var m = args.match(/^"([^"]+)"\s*"([^"]+)"$/);
+			if ( !m ) {
+				reply(msg, 'Usage is ` edit "old" "new" ` (quotes required)');
+				break;
+			}
+			var oldName = m[1];
+			if ( !db.data.Trackers[oldName] || !db.data.Trackers[oldName][msg.channel.id] ) {
+				reply(msg, 'Tracker for "' + oldName + '" not found in this channel');
+				break;
+			}
+			var newName = m[2];
+			if ( newName == oldName ) {
+				reply(msg, "meh");
+				break;
+			}
+			if ( !Hubs[newName] ) {
+				reply(msg, 'Unknown hub "' + newName + '"');
+				break;
+			}
+
+			// copy tracker entry
+			db.data.Trackers[newName] || (db.data.Trackers[newName] = {});
+			db.data.Trackers[newName][msg.channel.id] = db.data.Trackers[oldName][msg.channel.id];
+
+			// copy cache entry
+			if ( CachedTrackers[oldName] ) {
+				CachedTrackers[newName] || (CachedTrackers[newName] = {});
+				CachedTrackers[newName][msg.channel.id] = CachedTrackers[oldName][msg.channel.id];
+			}
+
+			// remove old tracker entry
+			removeTracker(oldName, msg.channel.id);
+
+			reply(msg, 'Successfully edited tracker "' + oldName + '" to "' + newName + '"');
+			break;
+
+		case 'cleanup':
+		case 'purge':
+			// get active trackers in channel (message ID is enough)
+			var activeTrackers = {};
+			for ( var hub in db.data.Trackers ) {
+				if ( db.data.Trackers[hub][msg.channel.id] )
+					activeTrackers[ db.data.Trackers[hub][msg.channel.id] ] = 1;
+			}
+
+			// get messages in channel
+			msg.channel.fetchMessages({ limit: 20 })
+			// only bot messages and exclude active trackers
+			.then(messages => messages.filter(msg => (msg.author.id == bot.user.id && !activeTrackers[msg.id])))
+			// bulk delete
+			//.then(messages => msg.channel.bulkDelete(messages))
+			.then(messages => messages.forEach(msg => msg.delete()))
+			.catch(err => {
+				console.warn("[Bot] Cleanup failed:", err.code, err.message);
+				reply(msg, "An error occured");
+			});
 			break;
 
 		case 'test':
