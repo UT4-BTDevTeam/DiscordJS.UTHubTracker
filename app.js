@@ -621,10 +621,12 @@ function updateTrackers(hubName, text) {
 	return Promise.all(promises)
 	.then(messages => messages.filter(msg => !!msg).map(msg =>
 		msg.edit(text)
+		/*
 		.then(msg => {
 			// update cache (not sure if necessary)
 			CachedTrackers[hubName][msg.channel.id] = msg;
 		})
+		*/
 		.catch(err => {
 			console.warn("[Bot] Failed to edit message " + msg.id + ":", err.code, err.message);
 			if ( err.code == 10008 ) {
