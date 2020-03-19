@@ -273,6 +273,34 @@ function includeKeyPath(inObj, keyPath, outObj) {
 	}
 }
 
+server.get('/weblist', function(req, res) {
+	var html = "<!DOCTYPE HTML>";
+	html += "<head></head>";
+	html += "<style>table,th,td{border:1px solid #333;}table{border-collapse:collapse;}th,td{padding:2px 4px;}</style>";
+	html += "<body style='background-color:#333'>";
+	for ( var name in Hubs ) {
+                hub = Hubs[name];
+                if ( !hub.stale ) {
+			html += "<div style='background-color:#fafafa;margin:1em;padding:0.5em'><h3 style='margin:0 0 0.5em 0'>" + hub.ServerName + "</h3>";
+			html += "<table><thead><tr><th>Instance</th><th>Game</th><th>Map</th><th>Players</th><th>Since</th></thead><tbody>";
+			for ( var instance of hub.Instances ) {
+				html += "<tr><td>";
+				if ( instance.Flags & MATCH_FLAGS.Private )
+					html += "🔒"
+				html += instance.CustomGameName + "</td><td>"
+				var game = instance.RulesTitle;
+				if ( game.startsWith('Custom ') )
+					game = '*'+game.substr(7);
+				html += game + "</td><td>" + instance.MapName + "</td><td>" + instance.NumPlayers + " / " + instance.MaxPlayers + "</td><td>" + formatAlive(hub.RealTimeSeconds - instance.InstanceLaunchTime) + "</td></tr>";
+			}
+			html += "</tbody></table></div>";
+                }
+        }
+	html += "</body>";
+	res.set('Content-Type', 'text/html');
+	res.send(html);
+});
+
 // Final catchall route for 404
 server.all('*', function(req, res) {
 	res.status(404).send({status:404, code:404, message:"Not Found"});
