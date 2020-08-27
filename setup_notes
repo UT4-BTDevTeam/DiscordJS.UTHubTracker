@@ -1,0 +1,59 @@
+##============================================================
+
+cd ~
+mkdir hubtracker
+git clone https://github.com/UT4-BTDevTeam/DiscordJS.UTHubTracker.git
+## download nodejs, extract, rename folder to 'nodejs'
+
+##============================================================
+## node_env
+
+export PATH=$HOME/hubtracker/nodejs/bin:$PATH
+export NODEJS_HOME=$HOME/hubtracker/nodejs
+
+##============================================================
+## restarter.sh
+
+#!/bin/sh
+echo pwd: $(pwd)
+cd "$(dirname "$0")"
+echo pwd: $(pwd)
+. ./node_env
+cd DiscordJS.UTHubTracker
+echo "restarting..."
+./prod.sh
+echo "restarted!"
+
+##============================================================
+## crontab
+
+@reboot      /bin/sh hubtracker/restarter.sh > hubtracker/cron.log 2>&1
+0 7 * * *    /bin/sh hubtracker/restarter.sh > hubtracker/cron.log 2>&1
+
+##============================================================
+## Virtual host with httpd
+
+<VirtualHost *:80>
+	ServerName hubtracker.ut4bt.ga
+	ProxyPass / http://127.0.0.1:12000/
+	ProxyPassReverse / http://127.0.0.1:12000/
+	ErrorLog /var/log/httpd/hubtracker.error.log
+	CustomLog /var/log/httpd/hubtracker.custom.log combined
+</VirtualHost>
+
+## SELinux: allow httpd to proxy localhost port
+
+sudo semanage port -a -t http_port_t -p tcp 12000
+
+##============================================================
+## Virtual host with nginx
+
+server {
+	listen 80;
+	server_name hubtracker.ut4bt.ga;
+	location / {
+		proxy_set_header Host $host;
+		proxy_set_header X-Forwarded-For $remote_addr;
+		proxy_pass http://127.0.0.1:12000;
+	}
+}
