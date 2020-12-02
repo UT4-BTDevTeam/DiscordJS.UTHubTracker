@@ -1,4 +1,5 @@
 
+
 const logger = require('./logger');
 const utils = require('./utils');
 
@@ -744,13 +745,13 @@ function formatHub(hub) {
 		lines.push(
 			utils.padAlignLeft(utils.truncate(name,18),20)
 			+ utils.padAlignLeft(utils.truncate(game,18),20)
-			+ utils.padAlignLeft(utils.truncate(instance.MapName,12),14)
+			+ utils.padAlignLeft(utils.truncate(sanitizeForDiscordBlock(instance.MapName),12),14)
 			+ utils.padAlignLeft(slots,9)
 			+ utils.padAlignRight(formatAlive(hub.RealTimeSeconds - instance.InstanceLaunchTime), 6)
 		);
 
 		// experimental: show players on second line
-		lines.push("> " + instance.Players.map(p => p.PlayerName.substr(0,10)).join(" "));
+		lines.push("> " + instance.Players.map(p => sanitizeForDiscordBlock(p.PlayerName).substr(0,10)).join(" "));
 		// + separator
 		separatorLines.push(lines.length);
 		lines.push("#" + utils.repeatStr('-', lines[5].length-2) + "#");
@@ -780,7 +781,7 @@ function formatAlive(seconds) {
 }
 
 function sanitizeForDiscordBlock(str) {
-	return str.replace(/`/g, "'").replace(/[_\n\r\t]/g, " ").trim();
+	return str.replace(/`/g, "'").replace(/[\n\r\t]/g, " ").replace(/_/g, "-").replace(/#/g, "♯").trim();
 }
 
 
