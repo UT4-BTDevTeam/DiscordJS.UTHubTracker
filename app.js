@@ -489,7 +489,7 @@ function processCommand(msg, cmd) {
 			}
 
 			// get messages in channel
-			msg.channel.fetchMessages({ limit: 20 })
+			msg.channel.messages.fetch({ limit: 20 })
 			// only bot messages and exclude active trackers
 			.then(messages => messages.filter(msg => (msg.author.id == bot.user.id && !activeTrackers[msg.id])))
 			// bulk delete
@@ -531,7 +531,7 @@ function processCommand(msg, cmd) {
 function send(channelID, text, rethrow) {
 	return Promise.resolve()
 	.then(_ => {
-		var channel = bot.channels.get(channelID);
+		var channel = bot.channels.cache.get(channelID);
 		if ( !channel )
 			throw new Error("Channel not found");
 
@@ -597,14 +597,14 @@ function findMessage(hubName, channelID, messageID) {
 		return Promise.resolve( CachedTrackers[hubName][channelID] );
 
 	// get channel
-	var chan = bot.channels.get(channelID);
+	var chan = bot.channels.cache.get(channelID);
 	if ( !chan ) {
 		console.warn("[Bot] Failed to get channel " + channelID);
 		return Promise.resolve(null);
 	}
 
 	// fetch message
-	return chan.fetchMessage(messageID)
+	return chan.messages.fetch(messageID)
 	.then(msg => {
 		// cache message
 		CachedTrackers[hubName] || (CachedTrackers[hubName] = {});
@@ -613,7 +613,7 @@ function findMessage(hubName, channelID, messageID) {
 	})
 	.catch(err => {
 		console.warn("[Bot] Failed to fetch message " + messageID + ":", err.code, err.message);
-		if ( err.code == 10008 ) {
+		if ( err.code == 10008 || err.code == 10003 ) {
 			// message has most likely been deleted - remove tracker
 			if ( db.data.Trackers[hubName] && db.data.Trackers[hubName][channelID] == messageID )
 				removeTracker(hubName, channelID);
