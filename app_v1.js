@@ -9,6 +9,11 @@ const utils = require('./utils');
 
 const config = require('./config.json');
 
+if ( typeof(config.server_port) != 'number' || !config.server_port ) {
+	config.server_port = 1337;
+	console.warn("Missing or invalid 'server_port' in configuration - defaulting to " + config.server_port);
+}
+
 if ( typeof(config.bot_token) != 'string' || !config.bot_token )
 	return console.error("Missing or invalid 'bot_token' in configuration");
 
@@ -69,147 +74,251 @@ console.info( Object.keys(db.data.Trackers).reduce((acc,hubName) => acc+Object.k
 
 
 //================================================
-// Poller
+// Server
 //================================================
 
-const fetch = require('node-fetch');
+const express = require('express');
+const server = express();
+
+// logger
+const onFinished = require('on-finished');
+server.use(function(req, res, next) {
+	req.headers || (req.headers = []);
+	// log error responses
+	onFinished(res, function() {
+		if ( res.statusCode >= 400 ) {
+			console.custom(res.statusCode, (res.statusCode < 500) ? logger.YELLOW : logger.RED,
+				req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.ip || req._remoteAddress || (req.connection && req.connection.remoteAddress) || '?',
+				req.method || '?',
+				req.url
+			);
+		}
+	});
+	// log api requests
+	if ( logger.debug ) {
+		console.custom('req', logger.CYAN,
+			req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.ip || req._remoteAddress || (req.connection && req.connection.remoteAddress) || '?',
+			req.method || '?',
+			req.url
+		);
+	}
+	return next();
+});
+
+// body parser
+server.use(require('body-parser').json({
+}));
+
+// gzip
+server.use(require('compression')({
+}));
+
+// favicon
+server.use(require('serve-favicon')(__dirname + '/favicon.jpg'));
+
+server.on('error', function onError(err) {
+	if ( err.syscall !== 'listen' )
+		throw err;
+	switch ( err.code ) {
+		case 'EACCES':
+			console.error("[Server] Port " + config.server_port + " requires elevated privileges");
+			process.exit(1);
+			break;
+		case 'EADDRINUSE':
+			console.error("[Server] Port " + config.server_port + " is already in use");
+			process.exit(1);
+			break;
+		default:
+			throw err;
+	}
+});
 
 // Map hubName => {hubData}
 const Hubs = {};
 
-const POLL_INTERVAL = 60000;
-const POLL_ERROR_INTERVAL = 60000;
-
-var playersMap = {};
-
-async function poller() {
-	var serverData = null;
-	try {
-		const res = await fetch("https://master-ut4.timiimit.com/ut/api/matchmaking/session/matchMakingRequest");
-		serverData = await res.json();
-	}
-	catch(err) {
-		console.error(err);
-		return setTimeout(poller, POLL_ERROR_INTERVAL);
+function accessControl(req, res, perm) {
+	var token = req.headers['x-api-token'];
+	if ( !token ) {
+		res.status(401).send({status:401, code:401, message:"Token required"});
+		return null;
 	}
 
-	// Initial fetch
-	if (Object.keys(playersMap).length == 0)
-		await refreshPlayersMap();
+	var user = config.server_keys ? config.server_keys[token] : null;
+	if ( !user ) {
+		res.status(401).send({status:401, code:401, message:"Invalid token"});
+		return null;
+	}
 
-	const hubGuidMap = {};
-	const hubsToUpdate = [];
+	if ( perm && (!user.perms || user.perms.indexOf('/'+perm+'/') == -1) ) {
+		res.status(403).send({status:403, code:403, message:"Forbidden"});
+		return null;
+	}
 
-	// Gather hubs into Hubs
-	for (let hubData of serverData.filter(item => item.attributes.UT_GAMEINSTANCE_i == 0)) {
-		let hubName = hubData.attributes.UT_SERVERNAME_s.trim();
-		hubData.hubName = hubName;
-		hubData.Instances = [];
-		hubData.timestamp = Date.now();
+	return user;
+}
 
-		if (!Hubs[hubName])
+// Entry point for HUB plugin (UTHubAdvertiser)
+server.post('/hub/post', function(req, res) {
+	if ( !accessControl(req, res, 'hubpost') )
+		return;
+
+	return Promise.resolve()
+	.then(_ => {
+
+		//debug
+		console.debug(req.body);
+		//console.debug(JSON.stringify(req.body,null,2));
+
+		if ( typeof(req.body.ServerName) != 'string' )
+			throw "invalid 'ServerName'";
+
+		var hubName = sanitizeForDiscordBlock(req.body.ServerName);
+		if ( !hubName )
+			throw "invalid 'ServerName'";
+
+		if ( Hubs[hubName] && Date.now() - Hubs[hubName].timestamp < 10000 )
+			throw "too many updates";
+
+		// validate used data to avoid crashes, just in case
+		if ( typeof(req.body.Players) != 'object' || !req.body.Players.length ) req.body.Players = [];
+		if ( typeof(req.body.Instances) != 'object' || !req.body.Instances.length ) req.body.Instances = [];
+		req.body.ElapsedTime = Number(req.body.ElapsedTime);
+		for ( var i of req.body.Instances ) {
+			i.CustomGameName = String(i.CustomGameName);
+			i.Flags = Number(i.Flags);
+			i.RulesTitle = String(i.RulesTitle);
+			i.MapName = String(i.MapName);
+			i.NumPlayers = Number(i.NumPlayers);
+			i.MaxPlayers = Number(i.MaxPlayers);
+			i.InstanceLaunchTime = Number(i.InstanceLaunchTime);
+			if ( typeof(i.Players) != 'object' || !i.Players.length ) i.Players = [];
+			for ( var p of i.Players ) {
+				p.PlayerName = String(p.PlayerName);
+			}
+		}
+
+		req.body.timestamp = Date.now();
+
+		if ( !Hubs[hubName] )
 			console.info('Registering new Hub "' + hubName + '"');
 
-		Hubs[hubName] = hubData;
+		Hubs[hubName] = req.body;
 
-		hubGuidMap[hubData.attributes.UT_HUBGUID_s] = hubData;
+		// Update trackers (asynchronously - errors here don't relate to the request)
+		setTimeout(function() {
+			updateTrackers(hubName, formatHub(req.body));
+		});
 
-		if (db.data.Trackers[hubName] && Object.keys(db.data.Trackers[hubName]).length > 0)
-			hubsToUpdate.push(hubData);
+		return res.json({ status:'OK' });
+	})
+	.catch(err => {
+		if ( typeof(err) == 'object' ) {
+			console.warn("[Server] Hub post error:", err);
+			res.status(500).send({status:500, code:500, message:"Internal Server Error"});
+		}
+		else
+			res.status(400).send({status:400, code:400, message:err});
+	});
+});
+
+// Public API : Get all current active hubs
+server.get(['/hubs', '/hubs/:schema'], function(req, res) {
+	var schema = (req.params.schema || "").split('+');
+
+	var data = {}, hub, output, keyPath;
+	for ( var name in Hubs ) {
+		hub = Hubs[name];
+		if ( !hub.stale ) {
+			output = {};
+			for ( keyPath of schema )
+				includeKeyPath(hub, keyPath, output);
+			data[name] = output;
+		}
 	}
 
-	// Gather instances into hubs
-	for (let instanceData of serverData.filter(item => item.attributes.UT_GAMEINSTANCE_i == 1)) {
-		let hub = hubGuidMap[instanceData.attributes.UT_HUBGUID_s];
-		if (hub)
-			hub.Instances.push(instanceData);
-	}
+	res.status(200).send({ status:'OK', data:data });
+});
 
-	// Resolve players
-	for (let hub of hubsToUpdate) {
-		for (let instance of hub.Instances) {
-			for (let i=0; i<instance.publicPlayers.length; i++) {
-				if (playersMap[instance.publicPlayers[i]] === undefined)
-					await refreshPlayersMap();
-				instance.publicPlayers[i] = playersMap[instance.publicPlayers[i]] || "???";
+function includeKeyPath(inObj, keyPath, outObj) {
+	if ( !inObj || !outObj )
+		return;
+
+	if ( typeof(keyPath) == 'string' )
+		keyPath = keyPath.split('.');
+
+	if ( keyPath.length == 1 ) {
+		// if array of objects, include an array of empty subobjects
+		// if array of values, include as is
+		if ( typeof(inObj[keyPath]) == 'object' && inObj[keyPath] ) {
+			outObj[keyPath] = inObj[keyPath].map(elem => {
+				if ( typeof(elem) == 'object' && elem )
+					return {};
+				else
+					return elem;
+			});
+		}
+		// if value, copy as is
+		else
+			outObj[keyPath] = inObj[keyPath];
+	}
+	else {
+		inObj = inObj[keyPath[0]];
+		outObj = outObj[keyPath[0]];
+		// if keys are properly set in right order, outObj array should be prepared with empty subobjects
+		if ( inObj && inObj.length && outObj && outObj.length ) {
+			for ( var i=0; i<inObj.length; i++ ) {
+				// recurse on array subobjects
+				includeKeyPath(inObj[i], keyPath.slice(1), outObj[i]);
 			}
 		}
 	}
-
-	let ts = Date.now();
-	for (let hub of hubsToUpdate) {
-		try {
-			updateTrackers(hub.hubName, formatHub(hub));
-		}
-		catch(err) { console.error(err); }
-		// Try to schedule discord updates overtime
-		await utils.delayPromise(0.80 * POLL_INTERVAL / hubsToUpdate.length);
-	}
-	let timeSpentUpdating = Date.now() - ts;
-
-	setTimeout(poller, Math.max(1, POLL_INTERVAL-timeSpentUpdating));
 }
 
-var playersMapLastRefresh = 0;	//avoid trying to refresh multiple times in the same cycle
-var authToken = null;
-
-async function refreshPlayersMap() {
-	if (playersMapLastRefresh > (Date.now() - 5000))
-		return;
-	playersMapLastRefresh = Date.now();
-
-	if (!await ensureAuthToken())
-		return;
-
-	try {
-		const res = await fetch("https://master-ut4.timiimit.com/account/api/public/accounts", {
-			headers: {
-				Authorization: 'Bearer ' + authToken.access_token,
+server.get('/weblist', function(req, res) {
+	var html = "<!DOCTYPE HTML>";
+	html += "<head></head>";
+	html += "<style>table,th,td{border:1px solid #333;}table{border-collapse:collapse;}th,td{padding:2px 4px;}</style>";
+	html += "<body style='background-color:#333'>";
+	for ( var name in Hubs ) {
+                hub = Hubs[name];
+                if ( !hub.stale ) {
+			html += "<div style='background-color:#fafafa;margin:1em;padding:0.5em'><h3 style='margin:0 0 0.5em 0'>" + hub.ServerName + "</h3>";
+			html += "<table><thead><tr><th>Instance</th><th>Game</th><th>Map</th><th>Players</th><th>Since</th></thead><tbody>";
+			for ( var instance of hub.Instances ) {
+				html += "<tr><td>";
+				if ( instance.Flags & MATCH_FLAGS.Private )
+					html += "🔒"
+				html += instance.CustomGameName + "</td><td>"
+				var game = instance.RulesTitle;
+				if ( game.startsWith('Custom ') )
+					game = '*'+game.substr(7);
+				html += game + "</td><td>" + instance.MapName + "</td><td>" + instance.NumPlayers + " / " + instance.MaxPlayers + "</td><td>" + formatAlive(hub.RealTimeSeconds - instance.InstanceLaunchTime) + "</td></tr>";
 			}
-		});
-		const data = await res.json();
-		if (data && data.length) {
-			console.info("Registering " + data.length + " players");
-			for (let entry of data)
-				playersMap[entry.id] = entry.displayName;
-		}
-	}
-	catch(err) {
-		console.error(err);
-	}
-}
+			html += "</tbody></table></div>";
+                }
+        }
+	html += "</body>";
+	res.set('Content-Type', 'text/html');
+	res.send(html);
+});
 
-async function ensureAuthToken() {
-	if (!authToken || authToken.expires_at < new Date(Date.now() - 10000))
-		await refreshAuthToken();
+// Final catchall route for 404
+server.all('*', function(req, res) {
+	res.status(404).send({status:404, code:404, message:"Not Found"});
+});
 
-	return (authToken != null);
-}
+// Error handling middleware
+server.use(function errorMiddleware(err, req, res, next) {
+	console.warn("[Server] Error caught in middleware:", err);
+	if ( res.headersSent )
+		next();
+	else
+		res.status(500).send({status:500, code:500, message:"Internal Server Error"});
+});
 
-var authTokenLastRefresh = 0;	//avoid trying to refresh multiple times in the same cycle
-
-async function refreshAuthToken() {
-	if (authTokenLastRefresh > (Date.now() - 5000))
-		return;
-	authTokenLastRefresh = Date.now();
-
-	try {
-		const res = await fetch('https://master-ut4.timiimit.com/account/api/oauth/token', {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/x-www-form-urlencoded',
-				// Using GameInstance hardcoded login
-				'Authorization': "Basic NmZmNDNlNzQzZWRjNGQxZGJhYzM1OTQ4NzdiNGJlZDk6NTQ2MTlkNmY4NGQ0NDNlMTk1MjAwYjU0YWI2NDlhNTM="
-			},
-			body: 'grant_type=client_credentials'
-		});
-		authToken = await res.json();
-	}
-	catch(err) {
-		console.error(err);
-		authToken = null;
-	}
-}
+const ServerListener = server.listen(config.server_port, function() {
+	console.info("[Server] Running on port " + config.server_port);
+});
 
 
 //================================================
@@ -225,7 +334,6 @@ function login() {
 	return bot.login(config.bot_token).then(_ => {
 		console.info("[Bot] Ready");
 		bot.bOnline = true;
-		setTimeout(poller);
 	});
 }
 
@@ -588,7 +696,7 @@ function formatSince(ts) {
 // Format hub message (if alive)
 function formatHub(hub) {
 
-	var hubName = sanitizeForDiscordBlock(hub.attributes.UT_SERVERNAME_s);
+	var hubName = sanitizeForDiscordBlock(hub.ServerName);
 
 	// case where hub exists but is stale (might be called from the ADD command)
 	if ( hub.stale )
@@ -599,7 +707,7 @@ function formatHub(hub) {
 		hubName,
 	];
 
-	var numPlayers = hub.totalPlayers + hub.Instances.reduce((acc,inst) => acc+inst.totalPlayers, 0);
+	var numPlayers = hub.Players.length + hub.Instances.reduce((acc,inst) => acc+inst.NumPlayers, 0);
 	numPlayers = utils.plural(numPlayers," player");
 	var numMatches = utils.plural(hub.Instances.length," match"," matches");
 	var len = Math.max(lines[1].length, numPlayers.length+4+numMatches.length);
@@ -609,38 +717,41 @@ function formatHub(hub) {
 	lines.push("");
 
 	lines.push(
-		utils.padAlignLeft("Instance", 60)
-		+ utils.padAlignRight("Players", 9)
+		utils.padAlignLeft("Instance",20)
+		+ utils.padAlignLeft("Game",20)
+		+ utils.padAlignLeft("Map",14)
+		+ utils.padAlignLeft("Players",9)
+		+ utils.padAlignRight("Since",6)
 	);
 
 	lines.push( utils.repeatStr('-', lines[5].length) );
 
 	var separatorLines = [];
 
-	for (let instance of hub.Instances) {
+	for ( var instance of hub.Instances ) {
 
-		var name = sanitizeForDiscordBlock(instance.attributes.UT_SERVERNAME_s);
-
-		// not sure if still applicable
-		if (name.startsWith('Custom '))
-			name = '*'+name.substr(7);
-
-		// not sure if this is the right flags
-		if (instance.attributes.UT_SERVERFLAGS_i & MATCH_FLAGS.Private)
+		var name = sanitizeForDiscordBlock(instance.CustomGameName);
+		if ( instance.Flags & MATCH_FLAGS.Private )
 			name = "🔒" + name;
-		
 
-		var slots = instance.attributes.UT_PLAYERONLINE_i + " / " + instance.attributes.UT_MAXPLAYERS_i;
-		if (slots.length <= 6)	// center the slash
+		var game = instance.RulesTitle;
+		if ( game.startsWith('Custom ') )
+			game = '*'+game.substr(7);
+
+		var slots = instance.NumPlayers + " / " + instance.MaxPlayers;
+		if ( slots.length <= 6 )	// center the slash
 			slots = " " + slots;
 
 		lines.push(
-			utils.padAlignLeft(utils.truncate(name,58),60)
-			+ utils.padAlignRight(slots,9)
+			utils.padAlignLeft(utils.truncate(name,18),20)
+			+ utils.padAlignLeft(utils.truncate(game,18),20)
+			+ utils.padAlignLeft(utils.truncate(sanitizeForDiscordBlock(instance.MapName),12),14)
+			+ utils.padAlignLeft(slots,9)
+			+ utils.padAlignRight(formatAlive(hub.RealTimeSeconds - instance.InstanceLaunchTime), 6)
 		);
 
 		// experimental: show players on second line
-		lines.push("> " + instance.publicPlayers.map(p => sanitizeForDiscordBlock(p).substr(0,10)).join(" "));
+		lines.push("> " + instance.Players.map(p => sanitizeForDiscordBlock(p.PlayerName).substr(0,10)).join(" "));
 		// + separator
 		separatorLines.push(lines.length);
 		lines.push("#" + utils.repeatStr('-', lines[5].length-2) + "#");

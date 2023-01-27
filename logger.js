@@ -18,7 +18,7 @@ console.ts = function() {
 
 console._log = console.log;
 
-console.log = function() { process.stdout.write(console.ts()   + " " + exports.GRAY    + "log:"   + exports.NORMAL + " "); console._log.apply(null, arguments); }
+console.log   = function() { process.stdout.write(console.ts() + " " + exports.GRAY    + "log:"   + exports.NORMAL + " "); console._log.apply(null, arguments) }
 
 console.main  = function() { process.stdout.write(console.ts() + " " + exports.MAGENTA + ">>>>"   + exports.NORMAL + " "); console._log.apply(null, arguments) }
 
