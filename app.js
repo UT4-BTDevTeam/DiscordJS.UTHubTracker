@@ -167,11 +167,20 @@ async function refreshPlayersMap() {
 				Authorization: 'Bearer ' + authToken.access_token,
 			}
 		});
-		const data = await res.json();
-		if (data && data.length) {
-			console.info("Registering " + data.length + " players");
-			for (let entry of data)
-				playersMap[entry.id] = entry.displayName;
+		if (res.status >= 400)
+			throw new Error(`Request failed: ${res.status} ${res.statusText}`);
+
+		const textData = await res.text();
+		try {
+			const data = JSON.parse(textData);
+			if (data && data.length) {
+				console.info("Registering " + data.length + " players");
+				for (let entry of data)
+					playersMap[entry.id] = entry.displayName;
+			}
+		}
+		catch(err) {
+			throw new Error(`JSON parse error: ${textData}`);
 		}
 	}
 	catch(err) {
@@ -180,7 +189,7 @@ async function refreshPlayersMap() {
 }
 
 async function ensureAuthToken() {
-	if (!authToken || authToken.expires_at < new Date(Date.now() - 10000))
+	if (!authToken || authToken.expires_at < new Date(Date.now() - 10000).toISOString())
 		await refreshAuthToken();
 
 	return (authToken != null);
@@ -204,6 +213,7 @@ async function refreshAuthToken() {
 			body: 'grant_type=client_credentials'
 		});
 		authToken = await res.json();
+		console.info("Token renewed until " + authToken.expires_at);
 	}
 	catch(err) {
 		console.error(err);
