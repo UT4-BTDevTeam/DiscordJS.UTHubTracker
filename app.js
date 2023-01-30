@@ -93,10 +93,6 @@ async function poller() {
 		return setTimeout(poller, POLL_ERROR_INTERVAL);
 	}
 
-	// Initial fetch
-	if (Object.keys(playersMap).length == 0)
-		await refreshPlayersMap();
-
 	const hubGuidMap = {};
 	const hubsToUpdate = [];
 
@@ -126,14 +122,27 @@ async function poller() {
 	}
 
 	// Resolve players
+	var playersToFetch = [];
 	for (let hub of hubsToUpdate) {
 		for (let instance of hub.Instances) {
 			for (let i=0; i<instance.publicPlayers.length; i++) {
 				if (playersMap[instance.publicPlayers[i]] === undefined)
-					await refreshPlayersMap();
-				instance.publicPlayers[i] = playersMap[instance.publicPlayers[i]] || "???";
+					playersToFetch.push(instance.publicPlayers[i]);
 			}
 		}
+	}
+	await fetchPlayers(playersToFetch);
+	for (let hub of hubsToUpdate) {
+		for (let instance of hub.Instances) {
+			for (let i=0; i<instance.publicPlayers.length; i++)
+				instance.publicPlayers[i] = playersMap[instance.publicPlayers[i]] || "???";
+		}
+	}
+
+	// If no players online - test mechanism on startup
+	if (Object.keys(playersMap).length == 0) {
+		await fetchPlayers(["7d005e76f7dfba062ceadd1c53596b40","4b2a00176c81cad9a955f8b1e767fed4","037dccff06ea000faf4fcc8295c2c440"]);
+		console.log("Test playersMap", playersMap);
 	}
 
 	let ts = Date.now();
@@ -150,23 +159,31 @@ async function poller() {
 	setTimeout(poller, Math.max(1, POLL_INTERVAL-timeSpentUpdating));
 }
 
-var playersMapLastRefresh = 0;	//avoid trying to refresh multiple times in the same cycle
 var authToken = null;
 
-async function refreshPlayersMap() {
-	if (playersMapLastRefresh > (Date.now() - 5000))
+async function fetchPlayers(list) {
+	while (list.length > 100) {
+		await fetchPlayers(list.slice(0,100));
+		list = list.slice(100);
+	}
+
+	if (list.length == 0)
 		return;
-	playersMapLastRefresh = Date.now();
 
 	if (!await ensureAuthToken())
 		return;
 
 	try {
-		const res = await fetch("https://master-ut4.timiimit.com/account/api/public/accounts", {
+		const params = new URLSearchParams();
+		for (let id of list)
+			params.append('accountId', id);
+
+		const res = await fetch("https://master-ut4.timiimit.com/account/api/public/account?" + params.toString(), {
 			headers: {
 				Authorization: 'Bearer ' + authToken.access_token,
 			}
 		});
+
 		if (res.status >= 400)
 			throw new Error(`Request failed: ${res.status} ${res.statusText}`);
 
@@ -174,7 +191,7 @@ async function refreshPlayersMap() {
 		try {
 			const data = JSON.parse(textData);
 			if (data && data.length) {
-				console.info("Registering " + data.length + " players");
+				//console.info("Registering " + data.length + " players");
 				for (let entry of data)
 					playersMap[entry.id] = entry.displayName;
 			}
